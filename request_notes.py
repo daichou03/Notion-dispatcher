@@ -13,7 +13,7 @@ def query_notion_database(database_id):
     Fetch all pages in the specified Notion database,
     handling pagination if there are more than 100 results.
     """
-    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+    url = f"https://api.notion.com/v1/databases/{database_id}/query"
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
