@@ -54,35 +54,68 @@ def query_notion_database(database_id):
     return all_pages
 
 
+import gspread
+from dateutil import parser
+from datetime import datetime
+
+def find_first_empty_id_row(worksheet, id_col):
+    """
+    Return the row number of the first empty cell in 'id_col' (below the header),
+    or None if none is found (meaning the column is fully occupied or no blank).
+    """
+    # Get all values in the ID column
+    # Note: col_values(1) returns ALL rows in that column (including row 1)
+    id_column_values = worksheet.col_values(id_col)
+
+    # Start from row 2, because row 1 is header
+    for row_index in range(1, len(id_column_values)):
+        # row_index is 0-based within the list, so the actual sheet row is row_index+1.
+        # But we started from range(1,...), so actual row is row_index. We'll handle carefully below.
+        actual_row = row_index + 1  # because the list is zero-based and we want 1-based sheet indexing
+        cell_value = id_column_values[row_index]
+        if not cell_value.strip():
+            # Found an empty 'id' cell
+            return actual_row
+
+    return None  # No empty cell found in the existing range
+
+
 def process_record(record, worksheet):
     """
-    Process a single Notion page record and update a Google Sheet accordingly.
-
-    Parameters:
-      record (dict): A Notion page record.
-      worksheet: A gspread Worksheet object with the following headers in the first row:
-                 "id", "created_time", "last_edited_time", "content", "to_analyse", "ready_to_dispatch".
-    
-    Behavior:
-      - If the record's id does not exist in the sheet, a new row is appended with:
-          id, created_time, last_edited_time, content from record,
-          "to_analyse" set to 1, and ready_to_dispatch left blank.
-      - If the record's id exists and its last_edited_time is newer than the one stored AND
-        ready_to_dispatch is not 1, the row is updated with the new last_edited_time and content,
-        and the to_analyse flag is set to 1.
-      - Otherwise, no changes are made.
+    Process a single Notion page record and update a Google Sheet accordingly,
+    but fill the first empty row (based on blank 'id' cell) rather than append.
     """
 
-    # Extract necessary values from the record
-    page_id = record.get("id")
-    created_time = record.get("created_time")
-    last_edited_time = record.get("last_edited_time")
-    
-    # Extract content from the "Name" property (concatenate all text segments if necessary)
-    title_parts = record.get("properties", {}).get("Name", {}).get("title", [])
-    content = "".join([part.get("plain_text", "") for part in title_parts])
+    # 1) Extract primary fields from the record
+    page_id = record.get("id", "")
+    raw_created_time = record.get("created_time", "")
+    raw_last_edited_time = record.get("last_edited_time", "")
 
-    # Retrieve header row to identify column indices (assuming headers are in row 1)
+    # 2) Parse timestamps into Python datetime objects (if valid)
+    created_dt = None
+    last_edited_dt = None
+
+    if raw_created_time:
+        try:
+            created_dt = parser.isoparse(raw_created_time)
+        except Exception:
+            created_dt = None
+
+    if raw_last_edited_time:
+        try:
+            last_edited_dt = parser.isoparse(raw_last_edited_time)
+        except Exception:
+            last_edited_dt = None
+
+    # 3) Extract content (e.g., from "Name" title property)
+    title_parts = (
+        record.get("properties", {})
+              .get("Name", {})
+              .get("title", [])
+    )
+    content = "".join(part.get("plain_text", "") for part in title_parts)
+
+    # 4) Identify column indices
     headers = worksheet.row_values(1)
     try:
         id_col = headers.index("id") + 1
@@ -94,48 +127,80 @@ def process_record(record, worksheet):
     except ValueError as e:
         raise Exception("One or more required headers are missing in the sheet.") from e
 
-    # Search for the record by id in the sheet
+    # (Optional) Check if there's a 'dispatched' column
+    try:
+        dispatched_col = headers.index("dispatched") + 1
+    except ValueError:
+        dispatched_col = None
+
+    # 5) Look for existing row by id
     try:
         cell = worksheet.find(page_id)
-    except Exception:
+    except gspread.exceptions.CellNotFound:
         cell = None
 
     if cell is None:
-        # Record not found: append a new row
-        new_row = [""] * len(headers)
-        new_row[id_col - 1] = page_id
-        new_row[created_time_col - 1] = created_time
-        new_row[last_edited_time_col - 1] = last_edited_time
-        new_row[content_col - 1] = content
-        new_row[to_analyse_col - 1] = "1"  # flag for analysis
-        new_row[ready_to_dispatch_col - 1] = ""  # not yet ready to dispatch
-        worksheet.append_row(new_row)
+        # 6) Not found in sheet -> fill the first empty 'id' cell row or append if none
+        empty_id_row = find_first_empty_id_row(worksheet, id_col)
+        if empty_id_row is None:
+            # If no empty ID cell found, fallback to appending
+            empty_id_row = worksheet.row_count + 1  # or just use append_row() below
+
+            new_row_data = [""] * len(headers)
+            new_row_data[id_col - 1] = page_id
+            if created_dt:
+                new_row_data[created_time_col - 1] = created_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if last_edited_dt:
+                new_row_data[last_edited_time_col - 1] = last_edited_dt.strftime("%Y-%m-%d %H:%M:%S")
+            new_row_data[content_col - 1] = content
+            # use "TRUE"/"FALSE" for checkbox columns
+            new_row_data[to_analyse_col - 1] = "TRUE"
+            new_row_data[ready_to_dispatch_col - 1] = "FALSE"
+            if dispatched_col:
+                new_row_data[dispatched_col - 1] = "FALSE"
+
+            worksheet.append_row(new_row_data)
+        else:
+            # We found a blank row for 'id', so we fill that row
+            if created_dt:
+                worksheet.update_cell(empty_id_row, created_time_col, created_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            if last_edited_dt:
+                worksheet.update_cell(empty_id_row, last_edited_time_col, last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            worksheet.update_cell(empty_id_row, id_col, page_id)
+            worksheet.update_cell(empty_id_row, content_col, content)
+            worksheet.update_cell(empty_id_row, to_analyse_col, "TRUE")
+            worksheet.update_cell(empty_id_row, ready_to_dispatch_col, "FALSE")
+            if dispatched_col:
+                worksheet.update_cell(empty_id_row, dispatched_col, "FALSE")
+
     else:
-        # Record found: check if an update is needed
+        # 7) Record found -> see if we need to update
         row_number = cell.row
         row_data = worksheet.row_values(row_number)
-        
-        # Retrieve the stored last_edited_time and ready_to_dispatch flag
-        existing_last_edited_time = row_data[last_edited_time_col - 1]
+
+        existing_last_edited_str = row_data[last_edited_time_col - 1]
         existing_ready_to_dispatch = row_data[ready_to_dispatch_col - 1]
-        
-        # Convert timestamp strings to datetime objects for comparison
-        try:
-            new_let = parser.isoparse(last_edited_time)
-        except Exception as e:
-            raise Exception("Invalid last_edited_time format in the new record.") from e
-        
-        try:
-            existing_let = parser.isoparse(existing_last_edited_time) if existing_last_edited_time else None
-        except Exception as e:
-            existing_let = None
-        
-        # Update only if the new record is more recent and the record is not flagged as ready to dispatch
-        if (existing_let is None or new_let > existing_let) and existing_ready_to_dispatch != "1":
-            worksheet.update_cell(row_number, last_edited_time_col, last_edited_time)
+
+        # Convert existing last_edited_time from sheet into datetime (if valid)
+        existing_let = None
+        if existing_last_edited_str:
+            try:
+                existing_let = parser.parse(existing_last_edited_str)
+            except Exception:
+                existing_let = None
+
+        is_more_recent = False
+        if last_edited_dt and (not existing_let or last_edited_dt > existing_let):
+            is_more_recent = True
+
+        # Only update if new record is more recent and not ready_to_dispatch
+        if is_more_recent and existing_ready_to_dispatch != "TRUE":
+            # Update last_edited_time, content, and to_analyse=TRUE
+            if last_edited_dt:
+                worksheet.update_cell(row_number, last_edited_time_col,
+                                      last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
             worksheet.update_cell(row_number, content_col, content)
-            worksheet.update_cell(row_number, to_analyse_col, "1")
-    return
+            worksheet.update_cell(row_number, to_analyse_col, "TRUE")
 
 
 def get_notion_page_text(page_obj):
