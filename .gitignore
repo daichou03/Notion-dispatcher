@@ -5,3 +5,6 @@ __pycache__/
 
 # .env
 .env
+
+# cred
+google-api-cred/
