@@ -1,7 +1,7 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import *
-
+from dateutil import parser
 
 NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
 NOTION_DISPATCHER_WORKSHEET_NAME = "Record"
@@ -29,9 +29,6 @@ def retrieve_notion_worksheet():
     return worksheet
 
 
-from dateutil import parser
-from datetime import datetime
-
 def find_first_empty_id_row(worksheet, id_col):
     """
     Return the row number of the first empty cell in 'id_col' (below the header),
@@ -51,7 +48,7 @@ def find_first_empty_id_row(worksheet, id_col):
             # Found an empty 'id' cell
             return actual_row
 
-    return None  # No empty cell found in the existing range
+    return len(id_column_values) + 1  # No empty cell found in the existing range
 
 
 def process_record(record, worksheet):
@@ -98,14 +95,9 @@ def process_record(record, worksheet):
         content_col = headers.index("content") + 1
         to_analyse_col = headers.index("to_analyse") + 1
         ready_to_dispatch_col = headers.index("ready_to_dispatch") + 1
+        dispatched_col = headers.index("dispatched") + 1
     except ValueError as e:
         raise Exception("One or more required headers are missing in the sheet.") from e
-
-    # (Optional) Check if there's a 'dispatched' column
-    try:
-        dispatched_col = headers.index("dispatched") + 1
-    except ValueError:
-        dispatched_col = None
 
     # 5) Look for existing row by id
     try:
@@ -114,41 +106,24 @@ def process_record(record, worksheet):
         cell = None
 
     if cell is None:
-        # 6) Not found in sheet -> fill the first empty 'id' cell row or append if none
+        # 6) Not found in sheet -> fill a blank row
         empty_id_row = find_first_empty_id_row(worksheet, id_col)
-        if empty_id_row is None:
-            # If no empty ID cell found, fallback to appending
-            empty_id_row = worksheet.row_count + 1  # or just use append_row() below
-
-            new_row_data = [""] * len(headers)
-            new_row_data[id_col - 1] = page_id
-            if created_dt:
-                new_row_data[created_time_col - 1] = created_dt.strftime("%Y-%m-%d %H:%M:%S")
-            if last_edited_dt:
-                new_row_data[last_edited_time_col - 1] = last_edited_dt.strftime("%Y-%m-%d %H:%M:%S")
-            new_row_data[content_col - 1] = content
-            # use "TRUE"/"FALSE" for checkbox columns
-            new_row_data[to_analyse_col - 1] = "TRUE"
-            new_row_data[ready_to_dispatch_col - 1] = "FALSE"
-            if dispatched_col:
-                new_row_data[dispatched_col - 1] = "FALSE"
-
-            worksheet.append_row(new_row_data)
-        else:
-            # We found a blank row for 'id', so we fill that row
-            if created_dt:
-                worksheet.update_cell(empty_id_row, created_time_col, created_dt.strftime("%Y-%m-%d %H:%M:%S"))
-            if last_edited_dt:
-                worksheet.update_cell(empty_id_row, last_edited_time_col, last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
-            worksheet.update_cell(empty_id_row, id_col, page_id)
-            worksheet.update_cell(empty_id_row, content_col, content)
-            worksheet.update_cell(empty_id_row, to_analyse_col, "TRUE")
-            worksheet.update_cell(empty_id_row, ready_to_dispatch_col, "FALSE")
-            if dispatched_col:
-                worksheet.update_cell(empty_id_row, dispatched_col, "FALSE")
-
+        if empty_id_row > worksheet.row_count:
+            # Exceeds number of existing rows, append
+            worksheet.append_row([""] * len(headers))
+        if created_dt:
+            worksheet.update_cell(empty_id_row, created_time_col, created_dt.strftime("%Y-%m-%d %H:%M:%S"))
+        if last_edited_dt:
+            worksheet.update_cell(empty_id_row, last_edited_time_col, last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
+        worksheet.update_cell(empty_id_row, id_col, page_id)
+        worksheet.update_cell(empty_id_row, content_col, content)
+        worksheet.update_cell(empty_id_row, to_analyse_col, "TRUE")
+        worksheet.update_cell(empty_id_row, ready_to_dispatch_col, "FALSE")
+        worksheet.update_cell(empty_id_row, dispatched_col, "FALSE")
+                
     else:
         # 7) Record found -> see if we need to update
+        # TODO: test logic below
         row_number = cell.row
         row_data = worksheet.row_values(row_number)
 
