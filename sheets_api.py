@@ -1,6 +1,6 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from config import *
+from config import GOOGLE_API_CRED
 from dateutil import parser
 
 NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
