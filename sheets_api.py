@@ -51,16 +51,16 @@ def find_first_empty_id_row(worksheet, id_col):
     return len(id_column_values) + 1  # No empty cell found in the existing range
 
 
-def process_record(record, worksheet):
+def import_notion_page(page, worksheet):
     """
     Process a single Notion page record and update a Google Sheet accordingly,
     but fill the first empty row (based on blank 'id' cell) rather than append.
     """
 
     # 1) Extract primary fields from the record
-    page_id = record.get("id", "")
-    raw_created_time = record.get("created_time", "")
-    raw_last_edited_time = record.get("last_edited_time", "")
+    page_id = page.get("id", "")
+    raw_created_time = page.get("created_time", "")
+    raw_last_edited_time = page.get("last_edited_time", "")
 
     # 2) Parse timestamps into Python datetime objects (if valid)
     created_dt = None
@@ -80,7 +80,7 @@ def process_record(record, worksheet):
 
     # 3) Extract content (e.g., from "Name" title property)
     title_parts = (
-        record.get("properties", {})
+        page.get("properties", {})
               .get("Name", {})
               .get("title", [])
     )
@@ -108,7 +108,8 @@ def process_record(record, worksheet):
     if cell is None:
         # 6) Not found in sheet -> fill a blank row
         empty_id_row = find_first_empty_id_row(worksheet, id_col)
-        if empty_id_row > worksheet.row_count:
+        # worksheet.row_count is 1 bigger than # actual rows for some reason
+        if empty_id_row >= worksheet.row_count:
             # Exceeds number of existing rows, append
             worksheet.append_row([""] * len(headers))
         if created_dt:
@@ -150,3 +151,8 @@ def process_record(record, worksheet):
                                       last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
             worksheet.update_cell(row_number, content_col, content)
             worksheet.update_cell(row_number, to_analyse_col, "TRUE")
+
+# Assuming pages are in reverse order of date
+def bulk_import_notion_page(pages, worksheet, ):
+    for page in pages[::-1]:
+        import_notion_page(page, worksheet)

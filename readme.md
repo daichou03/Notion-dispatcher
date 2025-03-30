@@ -11,3 +11,10 @@ from ai_analysis import *
 prompt = build_prompt(page_text)
 result_tuple = send_to_deepseek_ai(prompt)
 ```
+
+### Import to Google Sheet
+```python
+from sheets_api import *
+worksheet = retrieve_notion_worksheet()
+bulk_import_notion_page(all_pages, worksheet)
+```
