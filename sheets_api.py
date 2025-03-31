@@ -4,6 +4,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_API_CRED
 from dateutil import parser
 from gspread.utils import rowcol_to_a1
+from gspread.exceptions import APIError
 
 NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
 NOTION_DISPATCHER_WORKSHEET_NAME = "Record"
@@ -51,6 +52,42 @@ def find_first_empty_id_row(worksheet, id_col):
             return actual_row
 
     return len(id_column_values) + 1  # No empty cell found in the existing range
+
+GSPREAD_RETRY_SLEEP_SECONDS = 60   # Wait 1 minute before retrying
+GSPREAD_MAX_RETRIES = 3            # How many times to retry before giving up
+
+def safe_gspread_call(func, *args, **kwargs):
+    """
+    A helper that calls the given gspread function (func),
+    handles APIError exceptions due to rate/quota limits,
+    and retries after sleeping.
+    
+    Parameters:
+      func: A callable (e.g., worksheet.update).
+      *args, **kwargs: Arguments to pass to that function.
+    
+    Returns:
+      Whatever func(*args, **kwargs) returns if successful.
+
+    Raises:
+      - The last exception if we exceed MAX_RETRIES.
+    """
+    attempt = 0
+    while True:
+        try:
+            return func(*args, **kwargs)
+        except APIError as e:
+            # If it's specifically a rate-limit or quota error, we can try again
+            attempt += 1
+            if attempt > GSPREAD_MAX_RETRIES:
+                # Exceeded max tries; re-raise
+                raise
+            print(f"Hit quota/rate-limit error: {e}")
+            print(f"Retrying in {GSPREAD_RETRY_SLEEP_SECONDS} seconds (attempt {attempt}/{GSPREAD_RETRY_SLEEP_SECONDS})...")
+            time.sleep(GSPREAD_RETRY_SLEEP_SECONDS)
+        except Exception:
+            # Any other exception we don't retry
+            raise
 
 
 def import_notion_page(page, worksheet):
@@ -114,7 +151,7 @@ def import_notion_page(page, worksheet):
 
         # If row is beyond current sheet row_count, add a blank row
         if empty_id_row >= worksheet.row_count:
-            worksheet.append_row([""] * len(headers))
+            safe_gspread_call(worksheet.append_row, [""] * len(headers))
 
         # Build one row of data
         new_row_values = [""] * len(headers)
@@ -136,7 +173,7 @@ def import_notion_page(page, worksheet):
         end_a1   = rowcol_to_a1(empty_id_row, len(headers))  # e.g. "G5"
         row_range = f"{start_a1}:{end_a1}"
 
-        worksheet.update(row_range, [new_row_values])
+        safe_gspread_call(worksheet.update, row_range, [new_row_values])
 
     else:
         # -----------------------------
@@ -177,7 +214,7 @@ def import_notion_page(page, worksheet):
             end_a1   = rowcol_to_a1(row_number, len(headers))
             row_range = f"{start_a1}:{end_a1}"
 
-            worksheet.update(row_range, [current_row_values], value_input_option="USER_ENTERED")
+            safe_gspread_call(worksheet.update, row_range, [current_row_values], value_input_option="USER_ENTERED")
 
 # Assuming pages are in reverse order of date
 def bulk_import_notion_page(pages, worksheet, interval=100):
