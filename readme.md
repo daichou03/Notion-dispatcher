@@ -15,6 +15,7 @@ result_tuple = send_to_deepseek_ai(prompt)
 ### Import to Google Sheet
 ```python
 from sheets_api import *
-worksheet = retrieve_notion_worksheet()
-bulk_import_notion_page(all_pages, worksheet)
+sheet_category = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_CATEGORY)
+sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+bulk_import_notion_page(all_pages, sheet_record)
 ```

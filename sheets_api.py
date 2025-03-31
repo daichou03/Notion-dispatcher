@@ -7,9 +7,10 @@ from gspread.utils import rowcol_to_a1
 from gspread.exceptions import APIError
 
 NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
-NOTION_DISPATCHER_WORKSHEET_NAME = "Record"
+NOTION_DISPATCHER_WORKSHEET_NAME_CATEGORY = "Category"
+NOTION_DISPATCHER_WORKSHEET_NAME_RECORD = "Record"
 
-def retrieve_notion_worksheet():
+def retrieve_notion_worksheet(worksheet_name):
     # Define the scope for accessing Google Sheets and Google Drive
     scope = [
         'https://spreadsheets.google.com/feeds',
@@ -26,7 +27,7 @@ def retrieve_notion_worksheet():
     spreadsheet = client.open(NOTION_DISPATCHER_SPREADSHEET_NAME)
 
     # Retrieve the worksheet by its title (or use worksheet(index) for the index)
-    worksheet = spreadsheet.worksheet(NOTION_DISPATCHER_WORKSHEET_NAME)
+    worksheet = spreadsheet.worksheet(worksheet_name)
 
     # Now worksheet is a gspread Worksheet object that you can work with.
     return worksheet
@@ -88,6 +89,62 @@ def safe_gspread_call(func, *args, **kwargs):
         except Exception:
             # Any other exception we don't retry
             raise
+
+
+def fetch_ai_categories(worksheet):
+    """
+    Fetch a list of categories from the category sheet.
+    
+    We assume the sheet has at least these columns (exactly spelled):
+      - "Category"
+      - "Descrption"
+      - "AI Category?"
+    Additional columns may exist, but won't be used here.
+
+    Returns:
+        A list of dicts, each with:
+        {
+            "label": <Category cell>,
+            "description": <Descrption cell>
+        }
+      Only includes rows where "AI Category?" == "TRUE".
+    """
+    # 1) Read the header row (row 1) to find column indices
+    headers = worksheet.row_values(1)
+    try:
+        category_col_idx = headers.index("Category") + 1
+        description_col_idx = headers.index("Descrption") + 1
+        ai_col_idx = headers.index("AI Category?") + 1
+    except ValueError:
+        raise Exception("The required columns ('Category', 'Descrption', 'AI Category?') "
+                        "are not all found in the sheet's first row.")
+
+    # 2) Get all values in the sheet (or you can read row by row)
+    #    row_values(1) was the header. Let's get the entire sheet to parse each row.
+    all_data = worksheet.get_all_values()
+    
+    # 3) Build our output list
+    categories_list = []
+
+    # Skip row 0 (header row), iterate from row 2 onward
+    for row_idx in range(1, len(all_data)):
+        row = all_data[row_idx]
+        # Ensure row has enough columns (in case of short rows)
+        if len(row) < max(category_col_idx, description_col_idx, ai_col_idx):
+            continue
+
+        label_val = row[category_col_idx - 1].strip()
+        desc_val = row[description_col_idx - 1].strip()
+        ai_val = row[ai_col_idx - 1].strip().upper()  # e.g., "TRUE", "FALSE"
+        
+        # Only add if "AI Category?" is "TRUE"
+        if ai_val == "TRUE":
+            categories_list.append({
+                "label": label_val,
+                "description": desc_val
+            })
+    
+    return categories_list
 
 
 def import_notion_page(page, worksheet):

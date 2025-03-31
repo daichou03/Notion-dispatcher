@@ -5,32 +5,32 @@ from utils import parse_markdown_json
 DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API, base_url="https://api.deepseek.com")
 
 
-# TODO: To fetch from google sheets
-CATEGORIES = [
-    {
-        "label": "Swimming",
-        "description": "Related to swimming experiences and skills"
-    },
-    {
-        "label": "Doctor & Professional",
-        "description": "Academic, research, or professional topics"
-    },
-    {
-        "label": "Life & Experiences",
-        "description": "Travel, food, personal stories, etc."
-    },
-    {
-        "label": "Other",
-        "description": "Anything that does not fit other categories"
-    },
-    {
-        "label": "Food",
-        "description": "Information or review of a restaurant"
-    },
-]
+# Example of categories. Fetch from sheets_api.fetch_ai_categories
+# categories = [
+#     {
+#         "label": "Swimming",
+#         "description": "Related to swimming experiences and skills"
+#     },
+#     {
+#         "label": "Doctor & Professional",
+#         "description": "Academic, research, or professional topics"
+#     },
+#     {
+#         "label": "Life & Experiences",
+#         "description": "Travel, food, personal stories, etc."
+#     },
+#     {
+#         "label": "Other",
+#         "description": "Anything that does not fit other categories"
+#     },
+#     {
+#         "label": "Food",
+#         "description": "Information or review of a restaurant"
+#     },
+# ]
 
 
-def build_prompt(page_text):
+def build_prompt(page_text, categories):
     """
     Build two strings: one for the system role, one for the user role.
     - system_content: Overall instructions/context for the AI (how it should respond, what format, etc.)
@@ -44,7 +44,7 @@ def build_prompt(page_text):
     # ]
     
     category_lines = []
-    for cat in CATEGORIES:
+    for cat in categories:
         category_lines.append(f'• "{cat["label"]}": "{cat["description"]}"')
     categories_str = "\n".join(category_lines)
     
