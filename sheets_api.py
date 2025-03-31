@@ -1,7 +1,9 @@
+import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_API_CRED
 from dateutil import parser
+from gspread.utils import rowcol_to_a1
 
 NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
 NOTION_DISPATCHER_WORKSHEET_NAME = "Record"
@@ -54,39 +56,38 @@ def find_first_empty_id_row(worksheet, id_col):
 def import_notion_page(page, worksheet):
     """
     Process a single Notion page record and update a Google Sheet accordingly,
-    but fill the first empty row (based on blank 'id' cell) rather than append.
+    filling the first empty row if new, or updating the existing row if older.
+    This version does minimal requests by updating the entire row at once.
     """
 
-    # 1) Extract primary fields from the record
+    # 1) Extract primary fields
     page_id = page.get("id", "")
     raw_created_time = page.get("created_time", "")
     raw_last_edited_time = page.get("last_edited_time", "")
 
-    # 2) Parse timestamps into Python datetime objects (if valid)
     created_dt = None
-    last_edited_dt = None
-
     if raw_created_time:
         try:
             created_dt = parser.isoparse(raw_created_time)
-        except Exception:
-            created_dt = None
+        except:
+            pass
 
+    last_edited_dt = None
     if raw_last_edited_time:
         try:
             last_edited_dt = parser.isoparse(raw_last_edited_time)
-        except Exception:
-            last_edited_dt = None
+        except:
+            pass
 
-    # 3) Extract content (e.g., from "Name" title property)
+    # 2) Extract content from Notion's "Name" property
     title_parts = (
         page.get("properties", {})
-              .get("Name", {})
-              .get("title", [])
+            .get("Name", {})
+            .get("title", [])
     )
     content = "".join(part.get("plain_text", "") for part in title_parts)
 
-    # 4) Identify column indices
+    # 3) Identify columns by their header
     headers = worksheet.row_values(1)
     try:
         id_col = headers.index("id") + 1
@@ -96,63 +97,90 @@ def import_notion_page(page, worksheet):
         to_analyse_col = headers.index("to_analyse") + 1
         ready_to_dispatch_col = headers.index("ready_to_dispatch") + 1
         dispatched_col = headers.index("dispatched") + 1
-    except ValueError as e:
-        raise Exception("One or more required headers are missing in the sheet.") from e
+    except ValueError:
+        raise Exception("One or more required headers are missing in the sheet.")
 
-    # 5) Look for existing row by id
+    # 4) Search for existing ID in the sheet
     try:
         cell = worksheet.find(page_id)
     except gspread.exceptions.CellNotFound:
         cell = None
 
     if cell is None:
-        # 6) Not found in sheet -> fill a blank row
+        # -----------------------------
+        # NEW RECORD: find empty row
+        # -----------------------------
         empty_id_row = find_first_empty_id_row(worksheet, id_col)
-        # worksheet.row_count is 1 bigger than # actual rows for some reason
+
+        # If row is beyond current sheet row_count, add a blank row
         if empty_id_row >= worksheet.row_count:
-            # Exceeds number of existing rows, append
             worksheet.append_row([""] * len(headers))
+
+        # Build one row of data
+        new_row_values = [""] * len(headers)
+
+        # Fill in columns as needed
+        new_row_values[id_col - 1] = page_id
         if created_dt:
-            worksheet.update_cell(empty_id_row, created_time_col, created_dt.strftime("%Y-%m-%d %H:%M:%S"))
+            new_row_values[created_time_col - 1] = created_dt.strftime("%Y-%m-%d %H:%M:%S")
         if last_edited_dt:
-            worksheet.update_cell(empty_id_row, last_edited_time_col, last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
-        worksheet.update_cell(empty_id_row, id_col, page_id)
-        worksheet.update_cell(empty_id_row, content_col, content)
-        worksheet.update_cell(empty_id_row, to_analyse_col, "TRUE")
-        worksheet.update_cell(empty_id_row, ready_to_dispatch_col, "FALSE")
-        worksheet.update_cell(empty_id_row, dispatched_col, "FALSE")
-                
+            new_row_values[last_edited_time_col - 1] = last_edited_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        new_row_values[content_col - 1] = content
+        new_row_values[to_analyse_col - 1] = True   # Mark for analysis
+        new_row_values[ready_to_dispatch_col - 1] = False
+        new_row_values[dispatched_col - 1] = False
+
+        # We can do a single update for this entire row
+        start_a1 = rowcol_to_a1(empty_id_row, 1)  # e.g. "A5"
+        end_a1   = rowcol_to_a1(empty_id_row, len(headers))  # e.g. "G5"
+        row_range = f"{start_a1}:{end_a1}"
+
+        worksheet.update(row_range, [new_row_values])
+
     else:
-        # 7) Record found -> see if we need to update
-        # TODO: test logic below
+        # -----------------------------
+        # EXISTING RECORD: check update
+        # -----------------------------
         row_number = cell.row
         row_data = worksheet.row_values(row_number)
 
         existing_last_edited_str = row_data[last_edited_time_col - 1]
         existing_ready_to_dispatch = row_data[ready_to_dispatch_col - 1]
 
-        # Convert existing last_edited_time from sheet into datetime (if valid)
         existing_let = None
         if existing_last_edited_str:
             try:
                 existing_let = parser.parse(existing_last_edited_str)
-            except Exception:
-                existing_let = None
+            except:
+                pass
 
-        is_more_recent = False
-        if last_edited_dt and (not existing_let or last_edited_dt > existing_let):
-            is_more_recent = True
+        # Compare if new record is more recent
+        is_more_recent = (
+            last_edited_dt
+            and (not existing_let or last_edited_dt > existing_let)
+        )
 
-        # Only update if new record is more recent and not ready_to_dispatch
+        # Only update if more recent AND not flagged ready_to_dispatch
         if is_more_recent and existing_ready_to_dispatch != "TRUE":
-            # Update last_edited_time, content, and to_analyse=TRUE
+            # Build a single row update
+            current_row_values = worksheet.row_values(row_number)
+
+            # Update the relevant columns in memory first
             if last_edited_dt:
-                worksheet.update_cell(row_number, last_edited_time_col,
-                                      last_edited_dt.strftime("%Y-%m-%d %H:%M:%S"))
-            worksheet.update_cell(row_number, content_col, content)
-            worksheet.update_cell(row_number, to_analyse_col, "TRUE")
+                current_row_values[last_edited_time_col - 1] = last_edited_dt.strftime("%Y-%m-%d %H:%M:%S")
+            current_row_values[content_col - 1] = content
+            current_row_values[to_analyse_col - 1] = True
+
+            # Now do a single update
+            start_a1 = rowcol_to_a1(row_number, 1)  
+            end_a1   = rowcol_to_a1(row_number, len(headers))
+            row_range = f"{start_a1}:{end_a1}"
+
+            worksheet.update(row_range, [current_row_values], value_input_option="USER_ENTERED")
 
 # Assuming pages are in reverse order of date
-def bulk_import_notion_page(pages, worksheet, ):
+def bulk_import_notion_page(pages, worksheet, interval=100):
     for page in pages[::-1]:
         import_notion_page(page, worksheet)
+        time.sleep(interval)
