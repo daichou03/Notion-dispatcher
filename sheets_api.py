@@ -282,10 +282,12 @@ def bulk_import_notion_page(pages, worksheet, interval=100):
 
 def fetch_page_texts_to_analyse(worksheet):
     """
-    Retrieve a list of content strings ('page_texts') from the 'Record' sheet
-    where the 'to_analyse' column is 'TRUE'.
+    Retrieve two lists from the 'Record' sheet:
+      - page_ids: IDs for each row marked "to_analyse" == "TRUE"
+      - page_texts: corresponding content strings
     
     The sheet is assumed to have columns:
+      - id
       - content
       - to_analyse
     in row 1 (header).
@@ -295,30 +297,34 @@ def fetch_page_texts_to_analyse(worksheet):
     # 1) Identify columns by name in the header row
     headers = worksheet.row_values(1)
     try:
+        id_col_idx = headers.index("id") + 1
         content_col_idx = headers.index("content") + 1
         to_analyse_col_idx = headers.index("to_analyse") + 1
     except ValueError:
-        raise Exception("Required columns 'content' and 'to_analyse' not found in the first row.")
+        raise Exception("Required columns 'id', 'content' and 'to_analyse' not found in the first row.")
 
     # 2) Get all data (including the header). We'll skip row 0 (header).
     all_rows = worksheet.get_all_values()
     
-    # 3) Build our list of page_texts
+    # 3) Build our lists of IDs and page_texts
+    page_ids = []
     page_texts = []
     
     for row_idx in range(1, len(all_rows)):
         row = all_rows[row_idx]
         # Make sure the row has enough columns (defensive check)
-        if len(row) < max(content_col_idx, to_analyse_col_idx):
+        if len(row) < max(id_col_idx, content_col_idx, to_analyse_col_idx):
             continue
         
-        # content is at content_col_idx-1 in 'row'
+        id_val = row[id_col_idx - 1].strip()
         text_val = row[content_col_idx - 1].strip()
         to_analyse_val = row[to_analyse_col_idx - 1].strip().upper()  # e.g. "TRUE" or "FALSE"
         
-        # If to_analyse == "TRUE", collect the content
+        # If to_analyse == "TRUE", collect the id and content
         if to_analyse_val == "TRUE":
+            page_ids.append(id_val)
             page_texts.append(text_val)
     
-    return page_texts
+    return page_ids, page_texts
+
 
