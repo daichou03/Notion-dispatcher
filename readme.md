@@ -8,7 +8,7 @@ all_pages = query_notion_database()
 ```python
 from sheets_api import *
 sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
-bulk_import_notion_page(all_pages, sheet_record)  # Requires many API calls
+bulk_import_notion_page(all_pages, sheet_record)  # Warning: potentially many API calls
 ```
 
 ### Retrieve notes and categories to analyse from Google Sheet
@@ -23,6 +23,11 @@ page_ids, page_texts = fetch_page_texts_to_analyse(sheet_record)
 ### Send notes to DeepSeek
 ```python
 from ai_analysis import *
-prompt = build_batch_prompt(page_ids[:5], page_texts[:5], categories)
+prompt = build_batch_prompt(page_ids, page_texts, categories)  # Warning: potentially large number of tokens
 result_data = send_to_deepseek_ai(prompt)
+```
+
+### Update AI results to Google Sheet
+```python
+update_ai_classification_in_record(sheet_record, result_data)
 ```

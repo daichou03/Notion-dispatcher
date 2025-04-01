@@ -35,6 +35,7 @@ def parse_markdown_json(markdown_text):
     try:
         data = json.loads(json_str)
     except json.JSONDecodeError:
-        data = {}
+        print("Warning: can't parse as JSON, possibly because the result is cut off. Return raw markdown_text instead.")
+        data = markdown_text
     
     return data

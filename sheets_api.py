@@ -1,4 +1,4 @@
-import time
+import time, sys
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_API_CRED
@@ -327,4 +327,99 @@ def fetch_page_texts_to_analyse(worksheet):
     
     return page_ids, page_texts
 
+
+def update_ai_classification_in_record(worksheet, ai_results):
+    """
+    Updates the 'Record' sheet with AI classification results and 
+    sets `to_analyse` to FALSE for each updated row.
+
+    The sheet must have columns (in row 1 headers):
+      - "id"
+      - "to_analyse"
+      - "ai_category"
+      - "ai_tags"
+      - "has_lexical_suggestion"
+      - "lexical_suggestion"
+
+    Each item in ai_results is a dict like:
+      {
+        "page_id": "18c81f71-36d9-8029-a648-d1a99893724b",
+        "category": "Food",
+        "tags": ["tag1", "tag2"],
+        "has_lexical_suggestion": false,
+        "lexical_suggestion": ""
+      }
+
+    We locate the row by 'page_id' in the "id" column, then:
+      1) Update ai_category, ai_tags, has_lexical_suggestion, lexical_suggestion 
+         in one range update (they're adjacent columns).
+      2) Set to_analyse = FALSE in a separate single-cell update.
+
+    If a row isn't found, we print a warning to stderr.
+    
+    safe_gspread_call is a function, e.g. safe_gspread_call(func, *args, **kwargs),
+    used to wrap the raw gspread calls to handle rate-limit/quota errors.
+    """
+
+    # 1) Read headers and find column indices
+    headers = safe_gspread_call(worksheet.row_values, 1)
+    try:
+        id_col               = headers.index("id") + 1
+        to_analyse_col       = headers.index("to_analyse") + 1
+        ai_category_col      = headers.index("ai_category") + 1
+        ai_tags_col          = headers.index("ai_tags") + 1
+        has_lex_sugg_col     = headers.index("has_lexical_suggestion") + 1
+        lex_sugg_col         = headers.index("lexical_suggestion") + 1
+    except ValueError as e:
+        raise Exception("Required columns are missing in the first row: "
+                        "'id', 'to_analyse', 'ai_category', 'ai_tags', "
+                        "'has_lexical_suggestion', 'lexical_suggestion'") from e
+
+    # 2) For each AI result, locate the row by page_id and update
+    for result in ai_results:
+        page_id             = result.get("page_id", "")
+        category            = result.get("category", "Other")
+        tags_list           = result.get("tags", [])
+        has_lexical_sugg    = result.get("has_lexical_suggestion", False)
+        lexical_suggestion  = result.get("lexical_suggestion", "")
+
+        # Convert tags list to a comma-joined string
+        tags_str = ", ".join(tags_list)
+
+        # Convert booleans to strings (for user-entered checkboxes, etc.)
+        has_lex_sugg_str = "TRUE" if has_lexical_sugg else "FALSE"
+
+        # 2a) Find the row for this page_id
+        try:
+            cell = safe_gspread_call(worksheet.find, page_id)
+        except ValueError:
+            cell = None
+
+        if not cell:
+            print(f"Warning: No row found for page_id {page_id}", file=sys.stderr)
+            continue
+
+        row_number = cell.row
+
+        # 2b) Update AI columns in one range
+        # We assume ai_category_col → lex_sugg_col are adjacent
+        update_values = [[category, tags_str, has_lex_sugg_str, lexical_suggestion]]
+        start_a1 = rowcol_to_a1(row_number, ai_category_col)
+        end_a1   = rowcol_to_a1(row_number, lex_sugg_col)
+        update_range = f"{start_a1}:{end_a1}"
+
+        safe_gspread_call(
+            worksheet.update,
+            update_range,
+            update_values,
+            value_input_option="USER_ENTERED"
+        )
+
+        # 2c) Set `to_analyse` = FALSE in a separate single-cell update
+        safe_gspread_call(
+            worksheet.update_cell,
+            row_number,
+            to_analyse_col,
+            "FALSE"
+        )
 

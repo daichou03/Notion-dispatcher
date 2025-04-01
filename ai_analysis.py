@@ -3,6 +3,7 @@ from config import DEEPSEEK_API
 from utils import parse_markdown_json
 
 DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API, base_url="https://api.deepseek.com")
+PROMPT_LENGTH_LIMIT = 8000
 
 
 # Example of categories. Fetch from sheets_api.fetch_ai_categories
@@ -128,6 +129,8 @@ def send_to_deepseek_ai(prompt):
     Replace 'DEEPSEEK_API_URL' with the actual URL and adapt the request/response as needed.
     """
     system_str, user_str = prompt
+    if max(map(len, prompt)) > PROMPT_LENGTH_LIMIT:
+        raise ValueError(f"Prompt length (either system or user) exceeds {PROMPT_LENGTH_LIMIT}")
 
     response = DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-chat",
