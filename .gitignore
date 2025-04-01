@@ -8,3 +8,4 @@ __pycache__/
 
 # cred
 google-api-cred/
+.DS_Store
