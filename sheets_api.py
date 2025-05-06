@@ -10,6 +10,12 @@ NOTION_DISPATCHER_SPREADSHEET_NAME = "Notion Notes Nexus"
 NOTION_DISPATCHER_WORKSHEET_NAME_CATEGORY = "Category"
 NOTION_DISPATCHER_WORKSHEET_NAME_RECORD = "Record"
 
+
+# -------
+# Generic
+# -------
+
+
 def retrieve_notion_worksheet(worksheet_name):
     # Define the scope for accessing Google Sheets and Google Drive
     scope = [
@@ -89,6 +95,11 @@ def safe_gspread_call(func, *args, **kwargs):
         except Exception:
             # Any other exception we don't retry
             raise
+
+
+# -----------------------------------------
+# Import Notion pages & Send to AI & Output
+# -----------------------------------------
 
 
 def fetch_ai_categories(worksheet):
@@ -423,3 +434,80 @@ def update_ai_classification_in_record(worksheet, ai_results):
             "FALSE"
         )
 
+
+# --------
+# Dispatch
+# --------
+
+
+from typing import List, Tuple
+
+def get_rows_to_dispatch(worksheet) -> List[Tuple[int, str, str]]:
+    """
+    Scan the sheet for rows where ready_to_dispatch==TRUE and dispatched==FALSE.
+    Returns a list of tuples: (row_index, content_to_dispatch, link).
+    """
+    # first fetch all values once
+    data = worksheet.get_all_values()
+    headers = data[0]
+    # map names to 1-based column indices
+    col = {name: i+1 for i, name in enumerate(headers)}
+
+    rows = []
+    for r, row in enumerate(data[1:], start=2):
+        ready = row[col['ready_to_dispatch'] - 1].strip().lower() in ('true', '1')
+        sent  = row[col['dispatched']         - 1].strip().lower() in ('true', '1')
+        if ready and not sent:
+            content = row[col['content_to_dispatch'] - 1]
+            link    = row[col['link']               - 1]
+            rows.append((r, content, link))
+    return rows
+
+
+def mark_dispatched(worksheet, row_idx: int):
+    """
+    Tick the 'dispatched' checkbox on the given row.
+    Uses safe_gspread_call to handle rate limits.
+    """
+    # find the 'dispatched' column index
+    headers = worksheet.row_values(1)
+    disp_col = headers.index('dispatched') + 1
+    safe_gspread_call(worksheet.update_cell, row_idx, disp_col, 'TRUE')
+
+
+# -------
+# Archive
+# -------
+
+def get_rows_to_archive(worksheet) -> List[Tuple[int, str]]:
+    """
+    Scan the sheet for rows where
+      - dispatched == TRUE
+      - source_archived == FALSE
+
+    Returns a list of tuples: (row_index, record_id).
+    """
+    data    = worksheet.get_all_values()
+    headers = data[0]
+    # map header name → 1-based column index
+    col = {name: i + 1 for i, name in enumerate(headers)}
+
+    rows = []
+    for r, row in enumerate(data[1:], start=2):
+        dispatched     = row[col['dispatched']       - 1].strip().lower() in ('true', '1')
+        source_archived = row[col['source_archived'] - 1].strip().lower() in ('true', '1')
+        if dispatched and not source_archived:
+            record_id = row[col['id'] - 1]
+            rows.append((r, record_id))
+    return rows
+
+
+def mark_source_archived(worksheet, row_idx: int):
+    """
+    Tick the 'source_archived' checkbox on the given row.
+    Uses safe_gspread_call to handle rate limits.
+    """
+    # find the 'source_archived' column index
+    headers      = worksheet.row_values(1)
+    archived_col = headers.index('source_archived') + 1
+    safe_gspread_call(worksheet.update_cell, row_idx, archived_col, 'TRUE')

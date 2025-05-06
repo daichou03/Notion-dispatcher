@@ -1,6 +1,9 @@
 import requests
 from config import NOTION_TOKEN, NOTION_DATABASE_ID
+from notion_client import Client
+from notion_client.errors import APIResponseError
 
+notion = Client(auth=NOTION_TOKEN)
 
 def query_notion_database():
     """
@@ -52,4 +55,16 @@ def get_notion_page_text(page_obj):
     if title_array:
         return title_array[0]["plain_text"]
     return ""
+
+def remove_notion_record(record_id: str) -> bool:
+    """
+    Archives a Notion page by its ID.
+    """
+    try:
+        # The pages.update endpoint supports an `archived` flag
+        notion.pages.update(page_id=record_id, archived=True)
+        return True
+    except APIResponseError as e:
+        print(f"[NotionAPI] Failed to archive {record_id}: {e}")
+        return False
 

@@ -8,4 +8,6 @@ __pycache__/
 
 # cred
 google-api-cred/
+
+# MacOS
 .DS_Store

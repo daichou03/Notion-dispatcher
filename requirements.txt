@@ -4,3 +4,5 @@ gspread>=6.2.0
 google-auth>=2.38.0
 python-dateutil>=2.9.0.post0
 openai>=1.68.2
+selenium>=4.32.0
+notion_client>=2.3.0

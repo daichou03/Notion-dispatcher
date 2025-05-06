@@ -31,3 +31,35 @@ result_data = send_to_deepseek_ai(prompt)
 ```python
 update_ai_classification_in_record(sheet_record, result_data)
 ```
+
+### Dispatch: Send notes to Milanote
+```python
+from sheets_api import *
+sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+rows = get_rows_to_dispatch(sheet_record)
+print(f"Found {len(rows)} rows to dispatch.")
+from dispatcher import *
+driver = init_browser()
+for row_idx, content, link in rows:
+    print(f"→ Dispatching row {row_idx} …")
+    if dispatch_note(driver, content, link):
+        mark_dispatched(sheet_record, row_idx)
+
+print("Dispatch complete.")
+driver.quit()
+```
+
+### Remove: Archive dispatched notes on Notion
+```python
+from sheets_api import *
+sheet = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+rows = get_rows_to_archive(sheet)
+print(f"Found {len(rows)} rows to archive in Notion.")
+from notion_api import *
+for row_idx, record_id in rows:
+    print(f"→ Archiving Notion record {record_id} (row {row_idx}) …")
+    if remove_notion_record(record_id):
+        mark_source_archived(sheet, row_idx)
+print("Archive pass complete.\n")
+driver.quit()
+```
