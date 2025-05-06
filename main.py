@@ -1,20 +1,44 @@
-import requests
-import notion_api, sheets_api, ai_analysis
-from config import *
+from notion_api import *
+from sheets_api import *
+from ai_analysis import *
+from dispatcher import *
 
+# Flag: to_analyse
+def notion_to_google_sheets():
+    all_pages = query_notion_database()
+    sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+    bulk_import_notion_page(all_pages, sheet_record)  # Warning: potentially many API calls
 
-if __name__ == "__main__":
-    # Fetch all pages from the database
-    pages = notion_api.query_notion_database()
+# Flag: ready_to_dispatch
+def google_sheets_to_ai():
+    sheet_category = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_CATEGORY)
+    sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+    categories = fetch_ai_categories(sheet_category)
+    page_ids, page_texts = fetch_page_texts_to_analyse(sheet_record)
+    prompt = build_batch_prompt(page_ids, page_texts, categories)  # Warning: potentially large number of tokens
+    result_data = send_to_deepseek_ai(prompt)
+    update_ai_classification_in_record(sheet_record, result_data)
 
-    # Example: Print each page's ID and Title property
-    for page in pages:
-        page_id = page["id"]
-        
-        # If your database has a 'Name' or 'Title' property:
-        title_data = page["properties"].get("Name", {}).get("title", [])
-        title_plain_text = title_data[0]["plain_text"] if title_data else "Untitled"
-        
-        print(f"Page ID: {page_id}")
-        print(f"Title: {title_plain_text}")
-        print("-----")
+# Flag: dispatched
+def google_sheets_to_dispatch():
+    sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+    rows = get_rows_to_dispatch(sheet_record)
+    print(f"Found {len(rows)} rows to dispatch.")
+    driver = init_browser()
+    for row_idx, content, link in rows:
+        print(f"→ Dispatching row {row_idx} …")
+        if dispatch_note(driver, content, link):
+            mark_dispatched(sheet_record, row_idx)
+    print("Dispatch complete.")
+    driver.quit()
+
+# Flag: source_archived
+def google_sheets_to_archive():
+    sheet = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
+    rows = get_rows_to_archive(sheet)
+    print(f"Found {len(rows)} rows to archive in Notion.")
+    for row_idx, record_id in rows:
+        print(f"→ Archiving Notion record {record_id} (row {row_idx}) …")
+        if remove_notion_record(record_id):
+            mark_source_archived(sheet, row_idx)
+    print("Archive pass complete.\n")
