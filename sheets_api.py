@@ -1,4 +1,5 @@
 import time, sys
+from dateutil.tz import tzutc
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from config import GOOGLE_API_CRED
@@ -242,6 +243,7 @@ def import_notion_page(page, worksheet):
         row_range = f"{start_a1}:{end_a1}"
 
         safe_gspread_call(worksheet.update, row_range, [new_row_values])
+        return True
 
     else:
         # -----------------------------
@@ -256,7 +258,7 @@ def import_notion_page(page, worksheet):
         existing_let = None
         if existing_last_edited_str:
             try:
-                existing_let = parser.parse(existing_last_edited_str)
+                existing_let = parser.parse(existing_last_edited_str).replace(tzinfo=tzutc())  # Time on google sheets SHOULD be UTC
             except:
                 pass
 
@@ -283,10 +285,14 @@ def import_notion_page(page, worksheet):
             row_range = f"{start_a1}:{end_a1}"
 
             safe_gspread_call(worksheet.update, row_range, [current_row_values], value_input_option="USER_ENTERED")
+            return True
+        else:
+            return False
 
 # Assuming pages are in reverse order of date
-def bulk_import_notion_page(pages, worksheet, interval=100):
+def bulk_import_notion_page(pages, worksheet, interval=1):
     for page in pages[::-1]:
+        print(f"→ Importing page {page.get("id", "")} …")
         import_notion_page(page, worksheet)
         time.sleep(interval)
 
