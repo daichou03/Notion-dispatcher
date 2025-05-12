@@ -2,6 +2,7 @@ from notion_api import *
 from sheets_api import *
 from ai_analysis import *
 from dispatcher import *
+from utils import *
 
 # Flag: new & to_analyse
 def notion_to_google_sheets():
@@ -15,9 +16,25 @@ def google_sheets_to_ai():
     sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
     categories = fetch_ai_categories(sheet_category)
     page_ids, page_texts = fetch_page_texts_to_analyse(sheet_record)
-    prompt = build_batch_prompt(page_ids, page_texts, categories)  # Warning: potentially large number of tokens
-    result_data = send_to_deepseek_ai(prompt)
-    update_ai_classification_in_record(sheet_record, result_data)
+
+    # decide on a conservative character budget for the user_content segment
+    # note: you also have system_content (~200–300 chars) and category list (~n*X chars)
+    max_chars_per_batch = PROMPT_LENGTH_LIMIT - PROMPT_FIXED_OVERHEAD  # leave headroom for system + categories
+
+    all_results = []
+    batches = chunk_page_items(page_ids, page_texts, max_chars_per_batch)
+    for batch_ids, batch_texts in batches:
+        prompt = build_batch_prompt(batch_ids, batch_texts, categories)
+        try:
+            batch_results = send_to_deepseek_ai(prompt)
+        except ValueError as e:
+            # you might choose to log/raise if a *single* text is itself too large
+            raise RuntimeError(f"Single text too large: {e}") from e
+
+        all_results.extend(batch_results)
+
+    # now write all at once (or incrementally) back to Sheets
+    update_ai_classification_in_record(sheet_record, all_results)
 
 # Flag: ready_to_dispatch -> dispatched
 def google_sheets_to_dispatch():

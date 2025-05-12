@@ -1,5 +1,6 @@
 import json
 import re
+from itertools import accumulate
 
 def parse_markdown_json(markdown_text):
     """
@@ -39,3 +40,24 @@ def parse_markdown_json(markdown_text):
         data = markdown_text
     
     return data
+
+
+def chunk_page_items(page_ids, page_texts, max_chars_per_batch):
+    """
+    Splits page_ids + page_texts into batches so that the
+    total length of the concatenated texts in each batch
+    is <= max_chars_per_batch.
+    """
+    # precompute lengths of each text
+    lengths = [len(t) for t in page_texts]
+    batches = []
+    start = 0
+    for i, total in enumerate(accumulate(lengths), start=1):
+        # if adding this item would overflow
+        if total - (accumulate(lengths)[start] if start>0 else 0) > max_chars_per_batch:
+            # close out previous batch
+            batches.append((page_ids[start:i-1], page_texts[start:i-1]))
+            start = i - 1
+    # add final batch
+    batches.append((page_ids[start:], page_texts[start:]))
+    return batches

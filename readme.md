@@ -19,3 +19,7 @@ google_sheets_to_dispatch()
 ```python
 google_sheets_to_archive()
 ```
+
+#### Outstanding issue
+notion_to_google_sheets(): Wait infinitely when network poor
+google_sheets_to_ai(): to split per prompt

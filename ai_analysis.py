@@ -3,6 +3,8 @@ from config import DEEPSEEK_API
 from utils import parse_markdown_json
 
 DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API, base_url="https://api.deepseek.com")
+# Note: DeepSeek has an output limit of 8192, so need to estimate it to control the input.
+PROMPT_FIXED_OVERHEAD = 2000  # Assumed size of "common parts" of the prompt. No assertion over it for now.
 PROMPT_LENGTH_LIMIT = 8000
 
 
@@ -124,13 +126,10 @@ def send_to_deepseek_ai(prompt):
       - custom tags
       - lexical suggestions
     Return the parsed results.
-    
-    Note: This is pseudo‐code for DeepSeek’s endpoint. 
-    Replace 'DEEPSEEK_API_URL' with the actual URL and adapt the request/response as needed.
     """
     system_str, user_str = prompt
-    if max(map(len, prompt)) > PROMPT_LENGTH_LIMIT:
-        raise ValueError(f"Prompt length (either system or user) exceeds {PROMPT_LENGTH_LIMIT}")
+    # if max(map(len, prompt)) > PROMPT_LENGTH_LIMIT:
+    #     raise ValueError(f"Prompt length (either system or user) exceeds {PROMPT_LENGTH_LIMIT}")
 
     response = DEEPSEEK_CLIENT.chat.completions.create(
         model="deepseek-chat",
@@ -138,6 +137,7 @@ def send_to_deepseek_ai(prompt):
             {"role": "system", "content": system_str},
             {"role": "user", "content": user_str},
         ],
+        max_tokens=8192,
         stream=False
     )
     markdown_text = response.choices[0].message.content
