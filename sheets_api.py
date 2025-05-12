@@ -290,7 +290,7 @@ def import_notion_page(page, worksheet):
             return False
 
 # Assuming pages are in reverse order of date
-def bulk_import_notion_page(pages, worksheet, interval=1):
+def bulk_import_notion_page(pages, worksheet, interval=100):
     for page in pages[::-1]:
         print(f"→ Importing page {page.get("id", "")} …")
         import_notion_page(page, worksheet)

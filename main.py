@@ -3,13 +3,13 @@ from sheets_api import *
 from ai_analysis import *
 from dispatcher import *
 
-# Flag: to_analyse
+# Flag: new & to_analyse
 def notion_to_google_sheets():
     all_pages = query_notion_database()
     sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
     bulk_import_notion_page(all_pages, sheet_record)  # Warning: potentially many API calls
 
-# Flag: ready_to_dispatch
+# Flag: to_analyse -> ready_to_dispatch
 def google_sheets_to_ai():
     sheet_category = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_CATEGORY)
     sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
@@ -19,7 +19,7 @@ def google_sheets_to_ai():
     result_data = send_to_deepseek_ai(prompt)
     update_ai_classification_in_record(sheet_record, result_data)
 
-# Flag: dispatched
+# Flag: ready_to_dispatch -> dispatched
 def google_sheets_to_dispatch():
     sheet_record = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
     rows = get_rows_to_dispatch(sheet_record)
@@ -32,7 +32,7 @@ def google_sheets_to_dispatch():
     print("Dispatch complete.")
     driver.quit()
 
-# Flag: source_archived
+# Flag: dispatched -> source_archived
 def google_sheets_to_archive():
     sheet = retrieve_notion_worksheet(NOTION_DISPATCHER_WORKSHEET_NAME_RECORD)
     rows = get_rows_to_archive(sheet)
